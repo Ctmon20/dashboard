@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Prisões - Operacional</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f172a; --card: #1e293b; --text: #f1f5f9;
+            --accent: #38bdf8; --pm: #22c55e; --pc: #ef4444; --media: #fbbf24;
+        }
+        * { box-sizing: border-box; }
+        body { 
+            font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text);
+            margin: 0; padding: 10px; height: 100vh; width: 100vw;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        header { 
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 20px; background: var(--card); border-radius: 8px;
+            margin-bottom: 10px; flex-shrink: 0; gap: 15px;
+        }
+        
+        .btn-voltar {
+            background: transparent; border: 1px solid var(--accent); color: var(--accent);
+            padding: 5px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;
+            font-size: 0.75rem; text-decoration: none; transition: 0.3s;
+        }
+        .btn-voltar:hover { background: var(--accent); color: var(--bg); }
+
+        .filters { display: flex; gap: 10px; }
+        .filters select {
+            background: var(--bg); color: white; border: 1px solid var(--accent);
+            padding: 5px; border-radius: 4px; font-size: 0.8rem;
+        }
+        .kpi-container {
+            display: grid; grid-template-columns: repeat(4, 1fr);
+            gap: 10px; margin-bottom: 10px; flex-shrink: 0;
+        }
+        .card {
+            background: var(--card); padding: 10px; border-radius: 8px;
+            text-align: center; border-bottom: 3px solid var(--accent);
+        }
+        .card h3 { margin: 0; font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; }
+        .card .value { font-size: 1.8rem; font-weight: 800; margin: 5px 0; }
+        
+        .grid { 
+            display: grid; grid-template-columns: repeat(3, 1fr); 
+            grid-template-rows: 1fr 1fr; gap: 10px; flex-grow: 1; min-height: 0;
+        }
+        .chart-box { 
+            background: var(--card); padding: 10px; border-radius: 8px;
+            display: flex; flex-direction: column; min-height: 0;
+        }
+        .area-box { grid-column: span 2; }
+        .progress-box { grid-column: span 1; padding: 15px; }
+
+        h4 { text-align: center; margin: 0 0 10px 0; font-size: 0.85rem; color: var(--accent); text-transform: uppercase; }
+        #tipicidades-list { overflow-y: auto; flex-grow: 1; }
+        .prog-item { margin-bottom: 15px; }
+        .prog-info { display: flex; justify-content: space-between; font-size: 0.7rem; color: #cbd5e1; margin-bottom: 4px; }
+        .prog-bar-bg { background: #334155; height: 10px; border-radius: 5px; overflow: hidden; }
+        .prog-bar-fill { background: var(--accent); height: 100%; transition: width 0.8s; }
+
+        canvas { flex-grow: 1 !important; width: 100% !important; height: 100% !important; }
+        #loader { position: fixed; inset: 0; background: var(--bg); display: flex; justify-content: center; align-items: center; z-index: 100; }
+        
+        @media (max-width: 1024px) { .grid { grid-template-rows: repeat(4, 300px); overflow-y: auto; } body { overflow-y: auto; height: auto; } }
+    </style>
+</head>
+<body>
+
+<div id="loader"><h2>Carregando Dados...</h2></div>
+
+<header>
+    <a href="index.html" class="btn-voltar">← VOLTAR</a>
+    <h2 style="margin:0; font-size: 1rem; flex-grow: 1;">
+        DASHBOARD CVLI - SEAD <span id="data-atualizacao-planilha" style="font-size: 0.8rem; color: var(--media); font-weight: normal; margin-left: 10px;"></span>
+    </h2>
+    <div class="filters">
+        <select id="f-ano"><option value="">Ano: Todos</option></select>
+        <select id="f-mes"><option value="">Mês: Todos</option></select>
+        <select id="f-comando"><option value="">Comando: Todos</option></select>
+    </div>
+    <div id="update-time" style="font-size: 0.7rem; color: var(--accent)"></div>
+</header>
+
+<div class="kpi-container">
+    <div class="card"><div class="value" id="t-total" style="color: var(--accent)">0</div><h3>Total Ocorrências</h3></div>
+    <div class="card" style="border-color: var(--media)"><div class="value" id="t-media" style="color: var(--media)">0</div><h3>Média Diária</h3></div>
+    <div class="card" style="border-color: var(--pc)"><div class="value" id="t-masculino" style="color: var(--pc)">0</div><h3>Homicídio</h3></div>
+    <div class="card" style="border-color: var(--pm)"><div class="value" id="t-feminino" style="color: var(--pm)">0</div><h3>Feminicídio</h3></div>
+</div>
+
+<div class="grid">
+    <div class="chart-box">
+        <h4 id="titulo-dinamico">Por Comando</h4>
+        <canvas id="c-comando"></canvas>
+    </div>
+    <div class="chart-box"><h4>Top 10 Cidades</h4><canvas id="c-cidade"></canvas></div>
+    <div class="chart-box"><h4>Distribuição por Turno</h4><canvas id="c-turno"></canvas></div>
+    
+    <div class="chart-box area-box"><h4>Evolução Mensal</h4><canvas id="c-mes"></canvas></div>
+    <div class="chart-box progress-box">
+        <h4>Instrumento Utilizado</h4>
+        <div id="tipicidades-list"></div>
+    </div>
+</div>
+
+<script>
+    if (sessionStorage.getItem('sead_logado') !== 'true') {
+        window.location.href = 'index.html';
+    }
+    Chart.register(ChartDataLabels);
+    
+    const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRMemH9WEZV1qQ1G0GMeokhLCo8_r-zY0wfz3fi2gGRajJAzxLar06oDxJaP1V4er1KNLN9hlQWFSsA/pub?gid=326476822&single=true&output=csv';
+    const urlAtualizacao = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRMemH9WEZV1qQ1G0GMeokhLCo8_r-zY0wfz3fi2gGRajJAzxLar06oDxJaP1V4er1KNLN9hlQWFSsA/pub?gid=1448845407&single=true&output=csv';
+
+    let rawData = [];
+    let charts = {};
+
+    const COL = { 
+        sex: 'SEXO', 
+        com: 'COMANDO', 
+        cid: 'CIDADE', 
+        dat: 'DATA', 
+        nat: 'NATUREZA',
+        opm: 'OPM', 
+        tur: 'TURNO',
+        sub: 'SUBJETIVIDADE', 
+        ins: 'INSTRUMENTO'    
+    };
+    const mesesNomes = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+    window.onload = iniciarDashboard;
+
+    function iniciarDashboard() {
+        // 1. Carrega os dados principais do Dashboard
+        Papa.parse(csvUrl, {
+            download: true, header: true, skipEmptyLines: true,
+            complete: function(results) {
+                rawData = results.data;
+                populateFilters(rawData);
+                applyFilters();
+                document.getElementById('loader').style.display = 'none';
+            }
+        });
+
+        // 2. Carrega a atualização com proteção máxima contra erros de linhas vazias
+        Papa.parse(urlAtualizacao, {
+            download: true, 
+            header: false, 
+            skipEmptyLines: true,
+            complete: function(results) {
+                const linhas = results.data;
+                if(linhas && linhas.length > 0) {
+                    
+                    // Percorre todas as linhas vindas da planilha
+                    for (let i = 0; i < linhas.length; i++) {
+                        const colunas = linhas[i];
+                        
+                        // Verifica se a linha existe e se a primeira coluna tem texto
+                        if (colunas && colunas[0]) {
+                            const indicador = colunas[0].toString().trim().toUpperCase();
+                            
+                            // Se encontrar o CVLI, extrai os dados e interrompe o ciclo
+                            if (indicador === 'CVLI') {
+                                const dataPlanilha = colunas[1] ? colunas[1].toString().trim() : "";
+                                const horaPlanilha = colunas[2] ? colunas[2].toString().trim() : "";
+                                
+                                if (dataPlanilha) {
+                                    const textoFinal = `- Atualizado em: ${dataPlanilha} às ${horaPlanilha}`;
+                                    document.getElementById('data-atualizacao-planilha').innerText = textoFinal;
+                                    break; // Encontrou o CVLI, pode parar de procurar
+                                }
+                            }
+                        }
+                    }
+                    
+                }
+            }
+        });
+    }
+    function populateFilters(data) {
+        const anos = new Set(), comandos = new Set();
+        data.forEach(row => {
+            if(row[COL.dat]) { 
+                const dataLimpa = row[COL.dat].trim().split(' ')[0];
+                const dParts = dataLimpa.includes('/') ? dataLimpa.split('/') : dataLimpa.split('-');
+                
+                if (dParts.length === 3) {
+                    const a = dParts[0].length === 4 ? dParts[0] : dParts[2];
+                    if(a) anos.add(a); 
+                }
+            }
+            if(row[COL.com]) comandos.add(row[COL.com].trim());
+        });
+        const fAno = document.getElementById('f-ano'), fCom = document.getElementById('f-comando'), fMes = document.getElementById('f-mes');
+        
+        fAno.innerHTML = '<option value="">Ano: Todos</option>';
+        fCom.innerHTML = '<option value="">Comando: Todos</option>';
+        fMes.innerHTML = '<option value="">Mês: Todos</option>';
+
+        Array.from(anos).sort().forEach(a => fAno.innerHTML += `<option value="${a}">${a}</option>`);
+        Array.from(comandos).sort().forEach(c => fCom.innerHTML += `<option value="${c}">${c}</option>`);
+        mesesNomes.forEach((m, i) => fMes.innerHTML += `<option value="${String(i+1).padStart(2, '0')}">${m}</option>`);
+        [fAno, fMes, fCom].forEach(f => f.removeEventListener('change', applyFilters)); 
+        [fAno, fMes, fCom].forEach(f => f.addEventListener('change', applyFilters));
+    }
+
+    function applyFilters() {
+        const selAno = document.getElementById('f-ano').value;
+        const selMes = document.getElementById('f-mes').value;
+        const selCom = document.getElementById('f-comando').value;
+        
+        const filtered = rawData.filter(row => {
+            if (!row[COL.dat]) return false;
+
+            const dataLimpa = row[COL.dat].trim().split(' ')[0];
+            const dParts = dataLimpa.includes('/') ? dataLimpa.split('/') : dataLimpa.split('-');
+            
+            let anoLinha = "";
+            let mesLinha = "";
+
+            if (dParts.length === 3) {
+                if (dParts[0].length === 4) {
+                    anoLinha = dParts[0];
+                    mesLinha = dParts[1];
+                } else {
+                    anoLinha = dParts[2];
+                    mesLinha = dParts[1];
+                }
+            }
+
+            return (!selAno || anoLinha === selAno) && 
+                   (!selMes || mesLinha === selMes) && 
+                   (!selCom || (row[COL.com] && row[COL.com].trim() === selCom));
+        });
+
+        document.getElementById('titulo-dinamico').innerText = selCom ? `OPMs de ${selCom}` : "Por Comando";
+        updateDashboard(filtered, selCom);
+    }
+
+    function updateDashboard(data, selCom) {
+        let homicidios = 0, feminicidios = 0;
+        const counts = { principal: {}, cidade: {}, turno: {}, mes: {}, instrumento: {} };
+        const diasUnicos = new Set();
+
+        data.forEach(row => {
+            const sub = (row[COL.sub] || "").toUpperCase();
+            if (sub.includes("HOMICÍDIO") || sub.includes("HOMICIDIO")) homicidios++; 
+            else if (sub.includes("FEMINICÍDIO") || sub.includes("FEMINICIDIO")) feminicidios++;
+
+            if(row[COL.dat]) {
+                const dataLimpa = row[COL.dat].trim();
+                diasUnicos.add(dataLimpa);
+                
+                const apenasData = dataLimpa.split(' ')[0];
+                const dParts = apenasData.includes('/') ? apenasData.split('/') : apenasData.split('-');
+                
+                let mIdx = NaN;
+                
+                if (dParts.length === 3) {
+                    if (dParts[0].length === 4) {
+                        mIdx = parseInt(dParts[1]) - 1;
+                    } else {
+                        mIdx = parseInt(dParts[1]) - 1;
+                    }
+                }
+
+                if(!isNaN(mIdx) && mIdx >= 0 && mIdx < 12) {
+                    counts.mes[mesesNomes[mIdx]] = (counts.mes[mesesNomes[mIdx]] || 0) + 1;
+                }
+            }
+            
+            const chave = selCom ? row[COL.opm] : row[COL.com];
+            if(chave) counts.principal[chave] = (counts.principal[chave] || 0) + 1;
+            if(row[COL.cid]) counts.cidade[row[COL.cid]] = (counts.cidade[row[COL.cid]] || 0) + 1;
+            if(row[COL.tur]) counts.turno[row[COL.tur]] = (counts.turno[row[COL.tur]] || 0) + 1;
+            
+            if(row[COL.ins]) counts.instrumento[row[COL.ins]] = (counts.instrumento[row[COL.ins]] || 0) + 1;
+        });
+
+        document.getElementById('t-total').innerText = data.length;
+        document.getElementById('t-media').innerText = diasUnicos.size > 0 ? (data.length / diasUnicos.size).toFixed(1) : 0;
+        document.getElementById('t-masculino').innerText = homicidios;
+        document.getElementById('t-feminino').innerText = feminicidios;
+        document.getElementById('update-time').innerText = 'Sincronizado: ' + new Date().toLocaleTimeString();
+
+        renderColChart('c-comando', counts.principal, '#38bdf8', 10);
+        renderColChart('c-cidade', counts.cidade, '#22c55e', 10);
+        renderPieChart('c-turno', counts.turno);
+        renderAreaChart(counts.mes);
+        renderProgressBars(counts.instrumento, data.length);
+    }
+
+    function renderColChart(id, obj, color, limit) {
+        if(charts[id]) charts[id].destroy();
+        let items = Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, limit);
+        charts[id] = new Chart(document.getElementById(id), {
+            type: 'bar',
+            data: { labels: items.map(i => i[0]), datasets: [{ data: items.map(i => i[1]), backgroundColor: color, borderRadius: 4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: {display: false}, datalabels: { anchor: 'end', align: 'top', color: '#fff', font: {weight: 'bold', size: 10} } }, scales: { y: { display: false }, x: { ticks: { color: '#94a3b8', font: {size: 9} }, grid: { display: false } } } }
+        });
+    }
+
+    function renderPieChart(id, obj) {
+        if(charts[id]) charts[id].destroy();
+        let items = Object.entries(obj);
+        charts[id] = new Chart(document.getElementById(id), {
+            type: 'pie',
+            data: { 
+                labels: items.map(i => i[0]), 
+                datasets: [{ 
+                    data: items.map(i => i[1]), 
+                    backgroundColor: ['#38bdf8', '#22c55e', '#ef4444', '#fbbf24', '#a855f7', '#64748b'] 
+                }] 
+            },
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                plugins: { 
+                    legend: { display: true, position: 'bottom', labels: { color: '#94a3b8', font: {size: 10} } }, 
+                    datalabels: { 
+                        color: '#fff', font: {weight: 'bold', size: 11},
+                        formatter: (value, ctx) => {
+                            let sum = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                            return (value * 100 / sum).toFixed(0) + "%";
+                        }
+                    } 
+                } 
+            }
+        });
+    }
+
+    function renderAreaChart(obj) {
+        if(charts['c-mes']) charts['c-mes'].destroy();
+        
+        const labels = [...mesesNomes];
+        
+        charts['c-mes'] = new Chart(document.getElementById('c-mes'), {
+            type: 'line',
+            data: { 
+                labels: labels, 
+                datasets: [{ 
+                    label: 'Total', 
+                    data: labels.map(m => obj[m] || 0), 
+                    fill: true, 
+                    backgroundColor: 'rgba(56, 189, 248, 0.1)', 
+                    borderColor: '#38bdf8', 
+                    tension: 0.4 
+                }] 
+            },
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false, 
+                layout: {
+                    padding: {
+                        top: 25,     
+                        bottom: 10   
+                    }
+                },
+                plugins: { 
+                    datalabels: { 
+                        display: true, 
+                        color: '#ffffff', 
+                        align: 'top', 
+                        anchor: 'end', 
+                        font: { weight: 'bold', size: 11 } 
+                    }, 
+                    legend: { display: false } 
+                }, 
+                scales: { 
+                    y: { 
+                        display: false,
+                        grace: '10%' 
+                    }, 
+                    x: { 
+                        display: true,
+                        ticks: { 
+                            color: '#94a3b8',
+                            font: { size: 12 }
+                        },
+                        grid: {
+                            display: false 
+                        }
+                    } 
+                } 
+            }
+        });
+    }
+
+    function renderProgressBars(obj, total) {
+        const container = document.getElementById('tipicidades-list');
+        container.innerHTML = "";
+        let sorted = Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 10);
+        sorted.forEach(([label, val]) => {
+            const perc = total > 0 ? (val / total * 100).toFixed(1) : 0;
+            container.innerHTML += `<div class="prog-item"><div class="prog-info"><span>${label}</span><span>${val} (${perc}%)</span></div><div class="prog-bar-bg"><div class="prog-bar-fill" style="width: ${perc}%"></div></div></div>`;
+        });
+    }
+</script>
+</body>
+</html>
